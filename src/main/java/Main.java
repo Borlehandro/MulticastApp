@@ -63,7 +63,7 @@ public class Main {
                 }
             } catch (SocketTimeoutException e) {
                 System.out.println("Socket timeout");
-                break;
+                return;
             }
         }
     }
@@ -101,9 +101,11 @@ public class Main {
             do {
                 if(System.currentTimeMillis() - lastHelloTime > SEND_HELLO_TIME * 1000) {
                     sendHello(s, UID, name, address, port);
+                    lastHelloTime = System.currentTimeMillis();
                 }
                 if(System.currentTimeMillis() - lastCheckTime > CHECK_HELLO_TIME * 1000) {
                     checkHello(s, 2000, usersSet, UID);
+                    lastCheckTime = System.currentTimeMillis();
                     usersSet.forEach((uid, user) -> {
                         user.setOnline(System.currentTimeMillis() - user.getLastResponseTime() <= CHECK_HELLO_TIME * 2 * 1000);
                         System.out.println("UID : " + uid + "\n" + "Name : " + user.getName() + "\n" + (user.isOnline() ? "Online" : "Offline"));
