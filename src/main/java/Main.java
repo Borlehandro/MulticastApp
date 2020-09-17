@@ -2,16 +2,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.*;
-import java.util.Base64;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 public class Main {
 
     public static class User {
-        private final String name;
+        private String name;
         private boolean online;
-        private int timesWithoutResponse = 0;
+        private long lastResponseTime = System.currentTimeMillis();
 
         public User(String name, boolean online) {
             this.name = name;
@@ -30,39 +28,55 @@ public class Main {
             this.online = online;
         }
 
-        public void noResponse() {
-            if(timesWithoutResponse > 3) {
-                online = false;
-            } else
-                timesWithoutResponse++;
+        public void setName(String name) {
+            this.name = name;
         }
 
-        public void response() {
-            if(!online) {
-                timesWithoutResponse = 0;
-                online = true;
-            } else {
-                timesWithoutResponse--;
-            }
+        public long getLastResponseTime() {
+            return lastResponseTime;
+        }
+
+        public void setLastResponseTime(long lastResponseTime) {
+            this.lastResponseTime = lastResponseTime;
         }
     }
 
-    public static void checkHello(MulticastSocket socket, int timeout) throws IOException {
+    public static void checkHello(MulticastSocket socket, int timeout, Map<String, User> userSet, String myUID) throws IOException {
         socket.setSoTimeout(timeout);
         while (true) {
             try {
                 byte[] buf = new byte[1000];
                 DatagramPacket recv = new DatagramPacket(buf, buf.length);
                 socket.receive(recv);
+                String[] data = (new String(recv.getData())).split(" ");
+                String UID = data[1];
+                String name = data[2];
+                if(!UID.equals(myUID)) {
+                    User user;
+                    if((user = userSet.getOrDefault(UID, null)) != null) {
+                        user.setOnline(true);
+                        user.setName(name);
+                        user.setLastResponseTime(System.currentTimeMillis());
+                    } else {
+                        userSet.put(UID, new User(name, true));
+                    }
+                }
             } catch (SocketTimeoutException e) {
-                
+                System.out.println("Socket timeout");
+                break;
             }
         }
     }
 
+    public static void sendHello(MulticastSocket socket, String UID, String name, InetAddress address, int port) throws IOException {
+        String msg = "Hello " + UID + " " + name;
+        DatagramPacket datagram = new DatagramPacket(msg.getBytes(), msg.length(), address, port);
+        socket.send(datagram);
+    }
+
     public static void main(String[] args) {
 
-        Set<User> usersSet = new HashSet<>();
+        Map<String, User> usersSet = new HashMap<>();
 
         final int SEND_HELLO_TIME = 3;
         final int CHECK_HELLO_TIME = 9;
@@ -77,15 +91,25 @@ public class Main {
             System.out.print("Enter network interface ip: ");
             s.joinGroup(new InetSocketAddress(address, port), NetworkInterface.getByInetAddress(InetAddress.getByName(reader.readLine())));
             System.out.print("Enter your name: ");
+
             String name = reader.readLine();
             String UID = generateUid();
-            String msg = "Hello " + UID + " " + name;
-            while(!msg.isEmpty()) {
-                msg = reader.readLine();
-                DatagramPacket hi = new DatagramPacket(msg.getBytes(), msg.length(), address, port);
-                s.send(hi);
-                System.out.println("Get " + new String(buf));
-            }
+
+            long lastHelloTime = System.currentTimeMillis();
+            long lastCheckTime = System.currentTimeMillis();
+
+            do {
+                if(System.currentTimeMillis() - lastHelloTime > SEND_HELLO_TIME * 1000) {
+                    sendHello(s, UID, name, address, port);
+                }
+                if(System.currentTimeMillis() - lastCheckTime > CHECK_HELLO_TIME * 1000) {
+                    checkHello(s, 2000, usersSet, UID);
+                    usersSet.forEach((uid, user) -> {
+                        user.setOnline(System.currentTimeMillis() - user.getLastResponseTime() <= CHECK_HELLO_TIME * 2 * 1000);
+                        System.out.println("UID : " + uid + "\n" + "Name : " + user.getName() + "\n" + (user.isOnline() ? "Online" : "Offline"));
+                    });
+                }
+            } while (true);
         } catch (IOException e) {
             e.printStackTrace();
         }
